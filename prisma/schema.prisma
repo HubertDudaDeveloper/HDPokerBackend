@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Room {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  password  String?
+  points    String?
+  users     User[]
+  tasks     Task[]
+  votes     Vote[]
+  messages  Message[]
+  createdAt DateTime @default(now())
+  revealed  Boolean  @default(false)
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  roomId    String
+  image     String?
+  points    Int      @default(0)
+  vote      String?
+  room      Room?    @relation(fields: [roomId], references: [id])
+  createdAt DateTime @default(now())
+  Vote Vote[]
+}
+
+model Task {
+  id        String   @id @default(uuid())
+  name      String
+  image     String?
+  points    String?
+  link      String?
+  status    String   // "active" | "finished" | etc.
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id])
+  createdAt DateTime @default(now())
+  Vote Vote[]
+}
+
+model Vote {
+  id        String   @id @default(uuid())
+  value     String
+  userId    String
+  taskId    String
+  roomId    String
+  user      User     @relation(fields: [userId], references: [id])
+  task      Task     @relation(fields: [taskId], references: [id])
+  room      Room     @relation(fields: [roomId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  content   String
+  sender    String
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id])
+  createdAt DateTime @default(now())
+}
