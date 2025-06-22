@@ -1,21 +1,21 @@
-import { ExtendedWSS, messageTypes } from '../poker.types'
-import prisma from '../../../config/prisma'
-import WebSocket, { Server as WebSocketServer } from 'ws'
-import type { Room, User, Prisma } from '@prisma/client'
+import { ExtendedWSS, messageTypes } from "../poker.types";
+import prisma from "../../../config/prisma";
+import WebSocket, { Server as WebSocketServer } from "ws";
+import type { Room, User, Prisma } from "@prisma/client";
 
 interface UserInput {
-  image: string | null
-  id?: string
-  name: string
+  image: string | null;
+  id?: string;
+  name: string;
 }
 
 interface RoomInput {
-  name: string,
+  name: string;
 }
 
 interface ExtendedWebSocket extends WebSocket {
-  id?: string
-  roomId?: string
+  id?: string;
+  roomId?: string;
 }
 
 export const joinPoker = async (
@@ -23,20 +23,17 @@ export const joinPoker = async (
   room: RoomInput,
   ws: ExtendedWebSocket,
   wss: ExtendedWSS
-): Promise<
-  | {
-      user: User & { ws: WebSocket }
-      room: Prisma.RoomGetPayload<{
-        include: {
-          users: true
-          tasks: true
-          votes: true
-          messages: true
-        }
-      }>
-    }
-  | void
-> => {
+): Promise<{
+  user: User & { ws: WebSocket };
+  room: Prisma.RoomGetPayload<{
+    include: {
+      users: true;
+      tasks: true;
+      votes: true;
+      messages: true;
+    };
+  }>;
+} | void> => {
   try {
     // 1. Sprawdź, czy pokój istnieje i załaduj relacje
     const foundRoom = await prisma.room.findUnique({
@@ -45,39 +42,75 @@ export const joinPoker = async (
         users: true,
         tasks: true,
         votes: true,
-        messages: true
-      }
-    })
+        messages: true,
+      },
+    });
 
     if (!foundRoom) {
       ws.send(
         JSON.stringify({
           type: messageTypes.ERROR,
-          message: 'Room does not exist',
-          code: 404
+          message: "Room does not exist",
+          code: 404,
         })
-      )
-      return
+      );
+      return;
     }
 
-    // 2. Stwórz użytkownika
-    const createdUser = await prisma.user.create({
-      data: {
-        name: user.name,
-        image: user.image,
-        roomId: foundRoom.id
+    // 2. Znajdź lub stwórz użytkownika
+    let createdUser: User;
+
+    if (user.id) {
+      // Szukaj istniejącego użytkownika po ID
+      const existingUser = await prisma.user.findUnique({
+        where: { id: user.id },
+      });
+
+      if (!existingUser) {
+        // Tworzymy nowego użytkownika z podanym ID
+        createdUser = await prisma.user.create({
+          data: {
+            id: user.id,
+            name: user.name,
+            image: user.image,
+            roomId: foundRoom.id,
+          },
+        });
+      } else {
+        // Zaktualizuj przypisanie do pokoju jeśli trzeba
+        if (existingUser.roomId !== foundRoom.id) {
+          createdUser = await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              roomId: foundRoom.id,
+              name: user.name,
+              image: user.image,
+            },
+          });
+        } else {
+          createdUser = existingUser;
+        }
       }
-    })
+    } else {
+      // Stwórz nowego użytkownika bez ID (autogenerowane przez Prisma)
+      createdUser = await prisma.user.create({
+        data: {
+          name: user.name,
+          image: user.image,
+          roomId: foundRoom.id,
+        },
+      });
+    }
 
     // 3. Dodaj użytkownika do pamięci
-    wss.users.push({ ...createdUser, ws })
+    wss.users.push({ ...createdUser, ws });
 
     // 4. Broadcast do pozostałych użytkowników z pokoju
-    const userIdsInRoom = foundRoom.users.map((u) => u.id)
+    const userIdsInRoom = foundRoom.users.map((u) => u.id);
 
     for (const u of wss.users) {
       if (userIdsInRoom.includes(u.id!)) {
-        u.ws.send(`${user.name} has joined the room`)
+        u.ws.send(`${user.name} has joined the room`);
         u.ws.send(
           JSON.stringify({
             type: messageTypes.UPDATE,
@@ -86,15 +119,15 @@ export const joinPoker = async (
               name: foundRoom.name,
               password: foundRoom.password,
               points: foundRoom.points,
-              users: [...foundRoom.users, createdUser], // ważne: dodajemy nowego usera
+              users: [...foundRoom.users, createdUser],
               tasks: foundRoom.tasks,
               votes: foundRoom.votes,
               messages: foundRoom.messages,
               revealed: foundRoom.revealed,
-              createdAt: foundRoom.createdAt
-            }
+              createdAt: foundRoom.createdAt,
+            },
           })
-        )
+        );
       }
     }
 
@@ -105,26 +138,25 @@ export const joinPoker = async (
         user: createdUser,
         room: {
           ...foundRoom,
-          users: [...foundRoom.users, createdUser] // aby nowy user też był widoczny
-        }
+          users: [...foundRoom.users, createdUser],
+        },
       })
-    )
+    );
 
     return {
       user: { ...createdUser, ws },
       room: {
         ...foundRoom,
-        users: [...foundRoom.users, createdUser]
-      }
-    }
-
+        users: [...foundRoom.users, createdUser],
+      },
+    };
   } catch (error) {
-    console.error('[JOIN_POKER] Error:', error)
+    console.error("[JOIN_POKER] Error:", error);
     ws.send(
       JSON.stringify({
         type: messageTypes.ERROR,
-        message: 'Error joining room'
+        message: "Error joining room",
       })
-    )
+    );
   }
-}
+};
