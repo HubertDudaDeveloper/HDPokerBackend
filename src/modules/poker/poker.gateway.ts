@@ -6,6 +6,7 @@ import { resetPoker } from "./handlers/reset";
 import { revealPoker } from "./handlers/reveal";
 import { taskPoker } from "./handlers/task";
 import { ExtendedWSS, messageTypes } from "./poker.types";
+import { leavePoker } from "./handlers/leave";
 
 type PokerMessage = {
   type: string;
@@ -57,6 +58,9 @@ export const setupPokerWebSocket = (wss: ExtendedWSS) => {
           case messageTypes.TASK:
             await taskPoker(user, room, ws, wss);
             break;
+          case messageTypes.LEAVE:
+            await leavePoker(user, room, ws, wss);
+            break;
           default:
             ws.send(
               JSON.stringify({ type: "ERROR", message: "Unknown message type" })
@@ -70,8 +74,28 @@ export const setupPokerWebSocket = (wss: ExtendedWSS) => {
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close", async () => {
       console.log("[WS] Połączenie zamknięte");
+
+      // Znajdź użytkownika po websocket
+      const userLeaving = wss.users.find((u) => u.ws === ws);
+
+      if (!userLeaving || !userLeaving.id || !userLeaving.roomId) {
+        console.warn("[WS] Nie znaleziono użytkownika lub brak roomId");
+        return;
+      }
+
+      try {
+        // Spróbuj wywołać leavePoker dla danego użytkownika
+        await leavePoker(
+          { id: userLeaving.id, name: userLeaving.name },
+          { id: userLeaving.roomId },
+          ws,
+          wss
+        );
+      } catch (error) {
+        console.error("[WS] Błąd podczas automatycznego leavePoker:", error);
+      }
     });
   });
 };

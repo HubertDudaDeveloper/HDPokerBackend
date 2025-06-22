@@ -1,6 +1,6 @@
 import { ExtendedWSS, messageTypes } from '../poker.types'
 import prisma from '../../../config/prisma'
-import WebSocket, { Server as WebSocketServer } from 'ws'
+import WebSocket from 'ws'
 import type { User, Room } from '@prisma/client'
 
 interface UserInput {
@@ -27,7 +27,7 @@ export const resetPoker = async (
   | { error: string }
 > => {
   try {
-    // 1. Pobierz pokój z użytkownikami
+    // 1. Sprawdź czy pokój istnieje
     const fRoom = await prisma.room.findUnique({
       where: { id: room.id },
       include: { users: true }
@@ -39,35 +39,50 @@ export const resetPoker = async (
 
     const userIds = fRoom.users.map((u) => u.id)
 
-    // 2. Zresetuj głosy użytkowników
-    await prisma.user.updateMany({
-      where: {
-        roomId: room.id
-      },
-      data: {
-        vote: null
+    // 2. Reset głosów, punktów i ukrycie wyników
+    await prisma.$transaction([
+      prisma.user.updateMany({
+        where: { roomId: room.id },
+        data: {
+          vote: null,
+          points: '0'
+        }
+      }),
+      prisma.room.update({
+        where: { id: room.id },
+        data: { revealed: false }
+      })
+    ])
+
+    // 3. Pobierz zaktualizowany pokój
+    const updatedRoom = await prisma.room.findUnique({
+      where: { id: room.id },
+      include: {
+        users: true,
+        votes: true,
+        tasks: true,
+        messages: true
       }
     })
 
-    // 3. Broadcast do użytkowników
+    if (!updatedRoom) {
+      return { error: 'Updated room not found' }
+    }
+
+    // 4. Broadcast do użytkowników w pokoju
     for (const u of wss.users) {
       if (userIds.includes(u.id!)) {
         u.ws.send(`${user.name} has reset the votes`)
         u.ws.send(
           JSON.stringify({
             type: messageTypes.UPDATE,
-            room: {
-              id: fRoom.id,
-              name: fRoom.name,
-              revealed: fRoom.revealed,
-              createdAt: fRoom.createdAt
-            }
+            room: updatedRoom
           })
         )
       }
     }
 
-    return { user, room: fRoom }
+    return { user, room: updatedRoom }
 
   } catch (error) {
     console.error('[RESET_POKER] Error:', error)

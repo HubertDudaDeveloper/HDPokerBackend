@@ -1,6 +1,6 @@
 import { ExtendedWSS, messageTypes } from '../poker.types'
 import prisma from '../../../config/prisma'
-import WebSocket, { Server as WebSocketServer } from 'ws'
+import WebSocket from 'ws'
 import type { User, Room } from '@prisma/client'
 
 interface UserInput {
@@ -22,15 +22,21 @@ export const leavePoker = async (
   room: RoomInput,
   ws: ExtendedWebSocket,
   wss: ExtendedWSS
-): Promise<
-  | { user: UserInput; room: Room }
-  | { error: string }
-> => {
+): Promise<{ user: UserInput; room: Room } | { error: string }> => {
   try {
-    // 1. Sprawdź, czy pokój istnieje
+
+    if (!room.id) {
+      return { error: 'Missing room ID' }
+    }
+
     const fRoom = await prisma.room.findUnique({
       where: { id: room.id },
-      include: { users: true }
+      include: {
+        users: true,
+        tasks: true,
+        votes: true,
+        messages: true
+      }
     })
 
     if (!fRoom) {
@@ -39,19 +45,18 @@ export const leavePoker = async (
 
     // 2. Usuń użytkownika z bazy
     await prisma.user.delete({
-      where: { id: user.id }
+      where: { id: user.id },
     })
 
     // 3. Usuń użytkownika z WebSocketów
     wss.users = wss.users.filter((u) => u.id !== user.id)
 
-    const remainingUserIds = fRoom.users
-      .filter((u) => u.id !== user.id)
-      .map((u) => u.id)
+    const updatedUsers = fRoom.users.filter((u) => u.id !== user.id)
+    const remainingUserIds = updatedUsers.map((u) => u.id)
 
     // 4. Broadcast do pozostałych użytkowników
     for (const u of wss.users) {
-      if (remainingUserIds.includes(u.id!)) {
+      if (u.id && remainingUserIds.includes(u.id)) {
         u.ws.send(`${user.name} has left the room.`)
         u.ws.send(
           JSON.stringify({
@@ -59,9 +64,14 @@ export const leavePoker = async (
             room: {
               id: fRoom.id,
               name: fRoom.name,
+              points: fRoom.points,
+              users: updatedUsers,
+              tasks: fRoom.tasks,
+              votes: fRoom.votes,
+              messages: fRoom.messages,
               revealed: fRoom.revealed,
-              createdAt: fRoom.createdAt
-            }
+              createdAt: fRoom.createdAt,
+            },
           })
         )
       }
@@ -76,7 +86,7 @@ export const leavePoker = async (
     ws.send(
       JSON.stringify({
         type: messageTypes.ERROR,
-        message: 'Error leaving room'
+        message: 'Error leaving room',
       })
     )
     return { error: 'DB error' }

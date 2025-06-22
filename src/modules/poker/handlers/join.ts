@@ -1,15 +1,16 @@
 import { ExtendedWSS, messageTypes } from '../poker.types'
 import prisma from '../../../config/prisma'
 import WebSocket, { Server as WebSocketServer } from 'ws'
-import type { Room, User } from '@prisma/client'
+import type { Room, User, Prisma } from '@prisma/client'
 
 interface UserInput {
+  image: string | null
   id?: string
   name: string
 }
 
 interface RoomInput {
-  name: string
+  name: string,
 }
 
 interface ExtendedWebSocket extends WebSocket {
@@ -25,15 +26,27 @@ export const joinPoker = async (
 ): Promise<
   | {
       user: User & { ws: WebSocket }
-      room: Room & { users: User[] }
+      room: Prisma.RoomGetPayload<{
+        include: {
+          users: true
+          tasks: true
+          votes: true
+          messages: true
+        }
+      }>
     }
   | void
 > => {
   try {
-    // 1. Sprawdź, czy pokój istnieje
+    // 1. Sprawdź, czy pokój istnieje i załaduj relacje
     const foundRoom = await prisma.room.findUnique({
       where: { name: room.name },
-      include: { users: true }
+      include: {
+        users: true,
+        tasks: true,
+        votes: true,
+        messages: true
+      }
     })
 
     if (!foundRoom) {
@@ -51,13 +64,16 @@ export const joinPoker = async (
     const createdUser = await prisma.user.create({
       data: {
         name: user.name,
+        image: user.image,
         roomId: foundRoom.id
       }
     })
 
-    // 3. Broadcast do użytkowników z pokoju
-    const userIdsInRoom = foundRoom.users.map((u) => u.id)
+    // 3. Dodaj użytkownika do pamięci
     wss.users.push({ ...createdUser, ws })
+
+    // 4. Broadcast do pozostałych użytkowników z pokoju
+    const userIdsInRoom = foundRoom.users.map((u) => u.id)
 
     for (const u of wss.users) {
       if (userIdsInRoom.includes(u.id!)) {
@@ -69,6 +85,11 @@ export const joinPoker = async (
               id: foundRoom.id,
               name: foundRoom.name,
               password: foundRoom.password,
+              points: foundRoom.points,
+              users: [...foundRoom.users, createdUser], // ważne: dodajemy nowego usera
+              tasks: foundRoom.tasks,
+              votes: foundRoom.votes,
+              messages: foundRoom.messages,
               revealed: foundRoom.revealed,
               createdAt: foundRoom.createdAt
             }
@@ -77,18 +98,24 @@ export const joinPoker = async (
       }
     }
 
-    // 4. Potwierdzenie do nowego użytkownika
+    // 5. Potwierdzenie do nowego użytkownika
     ws.send(
       JSON.stringify({
         type: messageTypes.JOIN,
         user: createdUser,
-        room: foundRoom
+        room: {
+          ...foundRoom,
+          users: [...foundRoom.users, createdUser] // aby nowy user też był widoczny
+        }
       })
     )
 
     return {
       user: { ...createdUser, ws },
-      room: foundRoom
+      room: {
+        ...foundRoom,
+        users: [...foundRoom.users, createdUser]
+      }
     }
 
   } catch (error) {

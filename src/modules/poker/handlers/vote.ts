@@ -1,40 +1,46 @@
-import { messageTypes } from '../poker.types'
+import { ExtendedWSS, messageTypes } from '../poker.types'
 import prisma from '../../../config/prisma'
 import WebSocket, { Server as WebSocketServer } from 'ws'
+import type { User, Room } from '@prisma/client'
 
 export const votePoker = async (
-  user: { id: string; name: string; vote?: string },
+  user: { id: string; name: string; points?: string },
   room: { id: string },
   ws: WebSocket,
-  wss: WebSocketServer & { users: any[] }
-) => {
+  wss: ExtendedWSS
+): Promise<{ user: User; room: Room } | { error: string }> => {
   try {
-    // 1. Jeśli brak głosu – zignoruj
-    if (!user.vote) {
-      return { user, room }
+    // 1. Jeśli brak punktów – zignoruj
+    if (!user.points) {
+      return { user, room } as any
     }
 
-    // 2. Zapisz głos użytkownika w bazie
+    // 2. Zapisz punkty użytkownika
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
-      data: { vote: user.vote }
+      data: { points: user.points }
     })
 
-    // 3. Pobierz pokój z użytkownikami
+    // 3. Pobierz pokój z relacjami
     const fRoom = await prisma.room.findUnique({
       where: { id: room.id },
-      include: { users: true }
+      include: {
+        users: true,
+        tasks: true,
+        votes: true,
+        messages: true
+      }
     })
 
     if (!fRoom) {
       return { error: 'Room not found' }
     }
 
-    const userIds = fRoom.users.map((u) => u.id)
+    const userIdsInRoom = fRoom.users.map((u) => u.id)
 
     // 4. Broadcast do użytkowników pokoju
     for (const u of wss.users) {
-      if (userIds.includes(u.id)) {
+      if (userIdsInRoom.includes(u.id)) {
         u.ws.send(`${user.name} has voted`)
         u.ws.send(
           JSON.stringify({
@@ -43,6 +49,11 @@ export const votePoker = async (
               id: fRoom.id,
               name: fRoom.name,
               revealed: fRoom.revealed,
+              points: fRoom.points,
+              tasks: fRoom.tasks,
+              users: fRoom.users,
+              votes: fRoom.votes,
+              messages: fRoom.messages,
               createdAt: fRoom.createdAt
             }
           })
@@ -57,7 +68,7 @@ export const votePoker = async (
     ws.send(
       JSON.stringify({
         type: messageTypes.ERROR,
-        message: 'Error submitting vote'
+        message: 'Error submitting points'
       })
     )
     return { error: 'DB error' }

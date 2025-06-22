@@ -1,6 +1,6 @@
 import { ExtendedWSS, messageTypes } from "../poker.types";
 import prisma from "../../../config/prisma";
-import WebSocket, { Server as WebSocketServer } from "ws";
+import WebSocket from "ws";
 import type { Room, Task, User } from "@prisma/client";
 
 interface TaskInput {
@@ -32,14 +32,14 @@ export const taskPoker = async (
   ws: WebSocket,
   wss: ExtendedWSS
 ): Promise<
-  | { user: UserInput; room: Room & { tasks: Task[] } }
+  | { user: UserInput; room: Room & { tasks: Task[]; users: User[] } }
   | { error: string }
 > => {
   try {
     // 1. Sprawdź pokój i użytkowników
     const fRoom = await prisma.room.findUnique({
       where: { id: room.id },
-      include: { users: true },
+      include: { users: true }
     });
 
     if (!fRoom) {
@@ -55,17 +55,21 @@ export const taskPoker = async (
       data: room.tasks.map((task) => ({
         name: task.name,
         status: task.status,
-        image: task.image ?? null,
         link: task.link ?? null,
-        points: task.points ?? null,
-        roomId: room.id,
-      })),
+        points: task.points || '0',
+        roomId: room.id
+      }))
     });
 
-    // 3. Pobierz zaktualizowany pokój z taskami
+    // 3. Pobierz zaktualizowany pokój z pełnym zakresem danych
     const updatedRoom = await prisma.room.findUnique({
       where: { id: room.id },
-      include: { tasks: true },
+      include: {
+        users: true,
+        tasks: true,
+        votes: true,
+        messages: true
+      }
     });
 
     if (!updatedRoom) {
@@ -79,7 +83,17 @@ export const taskPoker = async (
         u.ws.send(
           JSON.stringify({
             type: messageTypes.UPDATE,
-            room: updatedRoom,
+            room: {
+              id: updatedRoom.id,
+              name: updatedRoom.name,
+              points: updatedRoom.points,
+              revealed: updatedRoom.revealed,
+              createdAt: updatedRoom.createdAt,
+              users: updatedRoom.users,
+              tasks: updatedRoom.tasks,
+              votes: updatedRoom.votes,
+              messages: updatedRoom.messages
+            }
           })
         );
       }
@@ -91,7 +105,7 @@ export const taskPoker = async (
     ws.send(
       JSON.stringify({
         type: messageTypes.ERROR,
-        message: "Error updating tasks",
+        message: "Error updating tasks"
       })
     );
     return { error: "DB error" };

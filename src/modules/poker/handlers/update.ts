@@ -1,51 +1,68 @@
-import { messageTypes } from '../poker.types'
+import { messageTypes, ExtendedWSS } from '../poker.types'
 import prisma from '../../../config/prisma'
-import WebSocket, { Server as WebSocketServer } from 'ws'
+import WebSocket from 'ws'
+
+interface UserInput {
+  id: string
+  name: string
+  vote: string
+}
+
+interface RoomInput {
+  id: string
+}
 
 export const updatePoker = async (
-  user: { id: string; name: string; vote: string },
-  room: { id: string },
+  user: UserInput,
+  room: RoomInput,
   ws: WebSocket,
-  wss: WebSocketServer & { users: any[] }
+  wss: ExtendedWSS
 ) => {
   try {
-    // 1. Aktualizuj głos użytkownika
-    const updatedUser = await prisma.user.update({
+    // 1. Zapisz głos użytkownika
+    await prisma.user.update({
       where: { id: user.id },
       data: { vote: user.vote }
     })
 
-    // 2. Pobierz użytkowników z pokoju
-    const fRoom = await prisma.room.findUnique({
+    // 2. Pobierz pełny stan pokoju po aktualizacji
+    const updatedRoom = await prisma.room.findUnique({
       where: { id: room.id },
-      include: { users: true }
+      include: {
+        users: true,
+        votes: true,
+        tasks: true,
+        messages: true
+      }
     })
 
-    if (!fRoom) {
+    if (!updatedRoom) {
       return { error: 'Room not found' }
     }
 
-    const userIds = fRoom.users.map((u) => u.id)
+    const userIds = updatedRoom.users.map((u) => u.id)
 
-    // 3. Broadcast do użytkowników z pokoju
+    // 3. Broadcast do użytkowników w pokoju
     for (const u of wss.users) {
       if (userIds.includes(u.id)) {
         u.ws.send(`${user.name} has voted`)
         u.ws.send(
           JSON.stringify({
             type: messageTypes.UPDATE,
-            room: {
-              id: fRoom.id,
-              name: fRoom.name,
-              revealed: fRoom.revealed,
-              createdAt: fRoom.createdAt
-            }
+            room: updatedRoom
           })
         )
       }
     }
 
-    return { user: updatedUser, room: fRoom }
+    return {
+      user: {
+        id: user.id,
+        name: user.name,
+        vote: user.vote
+      },
+      room: updatedRoom
+    }
 
   } catch (error) {
     console.error('[UPDATE_POKER] Error:', error)

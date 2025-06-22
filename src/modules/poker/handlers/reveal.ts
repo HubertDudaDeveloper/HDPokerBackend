@@ -22,7 +22,7 @@ export const revealPoker = async (
   | { error: string }
 > => {
   try {
-    // 1. Pobierz pokój z użytkownikami
+    // 1. Sprawdź czy pokój istnieje
     const fRoom = await prisma.room.findUnique({
       where: { id: room.id },
       include: { users: true }
@@ -32,20 +32,35 @@ export const revealPoker = async (
       return { error: 'Room not found' }
     }
 
+    // 2. Ustal nowy stan "revealed"
     const newRevealedState = !fRoom.revealed
 
-    // 2. Zaktualizuj flagę
-    const updatedRoom = await prisma.room.update({
+    // 3. Zaktualizuj pokój
+    await prisma.room.update({
       where: { id: room.id },
-      data: { revealed: newRevealedState },
-      include: { users: true }
+      data: { revealed: newRevealedState }
     })
 
+    // 4. Pobierz pełne dane pokoju ponownie
+    const updatedRoom = await prisma.room.findUnique({
+      where: { id: room.id },
+      include: {
+        users: true,
+        votes: true,
+        tasks: true,
+        messages: true
+      }
+    })
+
+    if (!updatedRoom) {
+      return { error: 'Updated room not found' }
+    }
+
+    // 5. Rozgłoś do użytkowników w pokoju
     const userIds = updatedRoom.users.map((u) => u.id)
 
-    // 3. Broadcast do użytkowników
     for (const u of wss.users) {
-      if (userIds.includes(u.id!)) {
+      if (u.id && userIds.includes(u.id)) {
         u.ws.send(`${user.name} has ${newRevealedState ? 'revealed' : 'hidden'} the votes`)
         u.ws.send(
           JSON.stringify({
@@ -54,7 +69,12 @@ export const revealPoker = async (
               id: updatedRoom.id,
               name: updatedRoom.name,
               revealed: updatedRoom.revealed,
-              createdAt: updatedRoom.createdAt
+              createdAt: updatedRoom.createdAt,
+              points: updatedRoom.points,
+              users: updatedRoom.users,
+              votes: updatedRoom.votes,
+              tasks: updatedRoom.tasks,
+              messages: updatedRoom.messages
             }
           })
         )
