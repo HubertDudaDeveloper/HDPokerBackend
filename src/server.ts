@@ -15,7 +15,7 @@ const server = http.createServer(app);
 
 // WebSocket Server
 const wss = new WebSocketServer({ server }) as ExtendedWSS;
-setupPokerWebSocket(wss); // tu podłącz logikę WebSocketa
+setupPokerWebSocket(wss);
 wss.users = [];
 wss.rooms = [];
 

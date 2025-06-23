@@ -15,7 +15,6 @@ type PokerMessage = {
 };
 
 export const setupPokerWebSocket = (wss: ExtendedWSS) => {
-  // Inicjalizacja tablicy użytkowników jeśli nie istnieje
   wss.users = wss.users || [];
 
   wss.on("connection", (ws: WebSocket) => {

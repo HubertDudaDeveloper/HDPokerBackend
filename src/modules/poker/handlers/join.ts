@@ -61,13 +61,11 @@ export const joinPoker = async (
     let createdUser: User;
 
     if (user.id) {
-      // Szukaj istniejącego użytkownika po ID
       const existingUser = await prisma.user.findUnique({
         where: { id: user.id },
       });
 
       if (!existingUser) {
-        // Tworzymy nowego użytkownika z podanym ID
         createdUser = await prisma.user.create({
           data: {
             id: user.id,
@@ -77,7 +75,6 @@ export const joinPoker = async (
           },
         });
       } else {
-        // Zaktualizuj przypisanie do pokoju jeśli trzeba
         if (existingUser.roomId !== foundRoom.id) {
           createdUser = await prisma.user.update({
             where: { id: user.id },
@@ -92,7 +89,6 @@ export const joinPoker = async (
         }
       }
     } else {
-      // Stwórz nowego użytkownika bez ID (autogenerowane przez Prisma)
       createdUser = await prisma.user.create({
         data: {
           name: user.name,
