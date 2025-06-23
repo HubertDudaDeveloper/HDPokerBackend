@@ -117,7 +117,6 @@ export const joinPoker = async (
             room: {
               id: foundRoom.id,
               name: foundRoom.name,
-              password: foundRoom.password,
               points: foundRoom.points,
               users: [...foundRoom.users, createdUser],
               tasks: foundRoom.tasks,
